@@ -67,7 +67,7 @@ func (c *realServiceControl) CreateService(controller runtime.Object, svc *corev
 	kind := controller.GetObjectKind().GroupVersionKind().Kind
 	name := controllerMo.GetName()
 	namespace := controllerMo.GetNamespace()
-	_, err := c.kubeCli.CoreV1().Services(namespace).Create(context.TODO(), svc, metav1.CreateOptions{})
+	_, err := c.kubeCli.CoreV1().Services(namespace).Create(context.TODO(), svc, metav1.CreateOptions{}) //调用kube-apiserver创建资源去了
 	c.recordServiceEvent("create", name, kind, controller, svc, err)
 	return err
 }
@@ -86,7 +86,7 @@ func (c *realServiceControl) UpdateService(controller runtime.Object, svc *corev
 	var updateSvc *corev1.Service
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var updateErr error
-		updateSvc, updateErr = c.kubeCli.CoreV1().Services(namespace).Update(context.TODO(), svc, metav1.UpdateOptions{})
+		updateSvc, updateErr = c.kubeCli.CoreV1().Services(namespace).Update(context.TODO(), svc, metav1.UpdateOptions{}) //更新service资源
 		if updateErr == nil {
 			klog.Infof("update Service: [%s/%s] successfully, kind: %s, name: %s", namespace, svcName, kind, name)
 			return nil
@@ -129,7 +129,7 @@ func (c *realServiceControl) recordServiceEvent(verb, name, kind string, object 
 		reason := fmt.Sprintf("Failed%s", strings.Title(verb))
 		msg := fmt.Sprintf("%s Service %s in %s %s failed error: %s",
 			strings.ToLower(verb), svcName, kind, name, err)
-		c.recorder.Event(object, corev1.EventTypeWarning, reason, msg)
+		c.recorder.Eve[nt(object, corev1.EventTypeWarning, reason, msg)
 	}
 }
 

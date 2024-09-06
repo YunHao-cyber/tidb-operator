@@ -87,6 +87,7 @@ func (m *realTidbDiscoveryManager) Reconcile(obj client.Object) error {
 
 	meta, _ := getDiscoveryMeta(metaObj, controller.DiscoveryMemberName)
 	// Ensure RBAC
+	//#################跳过rbac逻辑
 	_, err := m.deps.TypedControl.CreateOrUpdateRole(obj, &rbacv1.Role{
 		ObjectMeta: meta,
 		Rules: []rbacv1.PolicyRule{
@@ -122,16 +123,19 @@ func (m *realTidbDiscoveryManager) Reconcile(obj client.Object) error {
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery rolebinding: %v", err)
 	}
-	d, err := m.getTidbDiscoveryDeployment(metaObj)
+	//#################跳过rbac逻辑
+
+	//看这部分逻辑！
+	d, err := m.getTidbDiscoveryDeployment(metaObj) //根据元数据信息获取到discovery的deployment信息
 	if err != nil {
 		return controller.RequeueErrorf("error generating discovery deployment: %v", err)
 	}
-	deploy, err := m.deps.TypedControl.CreateOrUpdateDeployment(obj, d)
+	deploy, err := m.deps.TypedControl.CreateOrUpdateDeployment(obj, d) //根据deployment信息到集群中创建出来
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery service: %v", err)
 	}
 	// RBAC ensured, reconcile
-	_, err = m.deps.TypedControl.CreateOrUpdateService(obj, getTidbDiscoveryService(metaObj, deploy, preferIPv6))
+	_, err = m.deps.TypedControl.CreateOrUpdateService(obj, getTidbDiscoveryService(metaObj, deploy, preferIPv6)) //创建discovery的service信息
 	if err != nil {
 		return controller.RequeueErrorf("error creating or updating discovery service: %v", err)
 	}
@@ -183,10 +187,10 @@ func (m *realTidbDiscoveryManager) getTidbDiscoveryDeployment(obj metav1.Object)
 		timezone = cluster.Timezone()
 		baseSpec = cluster.BaseDiscoverySpec()
 		podSpec = baseSpec.BuildPodSpec()
-		if cluster.Spec.Discovery.ComponentSpec != nil && cluster.Spec.Discovery.ComponentSpec.ReadinessProbe != nil {
+		if cluster.Spec.Discovery.ComponentSpec != nil && cluster.Spec.Discovery.ComponentSpec.ReadinessProbe != nil { //就绪探针配置
 			readinessProb = buildDiscoveryProb(cluster.Spec.Discovery.ComponentSpec.ReadinessProbe)
 		}
-		if cluster.Spec.Discovery.LivenessProbe != nil {
+		if cluster.Spec.Discovery.LivenessProbe != nil { //存活探针配置
 			livenessProbe = buildDiscoveryProb(cluster.Spec.Discovery.LivenessProbe)
 		}
 	case *v1alpha1.DMCluster:
@@ -206,6 +210,7 @@ func (m *realTidbDiscoveryManager) getTidbDiscoveryDeployment(obj metav1.Object)
 
 	meta, l := getDiscoveryMeta(obj, controller.DiscoveryMemberName)
 
+	//环境变量配置
 	envs := []corev1.EnvVar{
 		{
 			Name: "MY_POD_NAMESPACE",
@@ -227,7 +232,7 @@ func (m *realTidbDiscoveryManager) getTidbDiscoveryDeployment(obj metav1.Object)
 	envs = util.AppendEnv(envs, baseSpec.Env())
 	volMounts := []corev1.VolumeMount{}
 	volMounts = append(volMounts, baseSpec.AdditionalVolumeMounts()...)
-	discoveryContainer := corev1.Container{
+	discoveryContainer := corev1.Container{ //启动容器
 		Name:      "discovery",
 		Resources: controller.ContainerResource(resources),
 		Command: []string{

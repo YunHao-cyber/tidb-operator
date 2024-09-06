@@ -75,6 +75,7 @@ func NewPDMemberManager(dependencies *controller.Dependencies, pdScaler Scaler, 
 	}
 }
 
+// Sync 进行pd组件的sync操作
 func (m *pdMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	// If pd is not specified return
 	if tc.Spec.PD == nil {
@@ -88,26 +89,29 @@ func (m *pdMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 
 	// skip sync if pd is suspended
 	component := v1alpha1.PDMemberType
-	needSuspend, err := m.suspender.SuspendComponent(tc, component)
+	needSuspend, err := m.suspender.SuspendComponent(tc, component) //判断tc里面有没有配置pause
 	if err != nil {
 		return fmt.Errorf("suspend %s failed: %v", component, err)
 	}
-	if needSuspend {
+	if needSuspend { //pause了就直接return
 		klog.Infof("component %s for cluster %s/%s is suspended, skip syncing", component, tc.GetNamespace(), tc.GetName())
 		return nil
 	}
 
 	// Sync PD Service
+	// 第一步：sync pd的service资源。前两个步骤都是sync service方面的配置，第三步才是搞pd的sts，但其实我理解这个步骤的顺序并不重要，也可以先弄sts，然后配service，毕竟kube proxy配置iptables是动态的，pod running之后就会自动加入到service的endpoint里面去
 	if err := m.syncPDServiceForTidbCluster(tc); err != nil {
 		return err
 	}
 
 	// Sync PD Headless Service
+	// 第二步：sync pd的headless资源。这种类型的资源一般是用于需要知道具体是哪个pd 的pod来服务的
 	if err := m.syncPDHeadlessServiceForTidbCluster(tc); err != nil {
 		return err
 	}
 
 	// Sync PD StatefulSet
+	// *******第三步：sync pd的sts******
 	return m.syncPDStatefulSetForTidbCluster(tc)
 }
 
@@ -127,7 +131,7 @@ func (m *pdMemberManager) syncPDServiceForTidbCluster(tc *v1alpha1.TidbCluster) 
 		if err != nil {
 			return err
 		}
-		return m.deps.ServiceControl.CreateService(tc, newSvc)
+		return m.deps.ServiceControl.CreateService(tc, newSvc) //到k8s集群创建真实的service资源出来
 	}
 	if err != nil {
 		return fmt.Errorf("syncPDServiceForTidbCluster: failed to get svc %s for cluster %s/%s, error: %s", controller.PDMemberName(tcName), ns, tcName, err)
@@ -473,6 +477,7 @@ func (m *pdMemberManager) getNewPDServiceForTidbCluster(tc *v1alpha1.TidbCluster
 	pdSelector := label.New().Instance(instanceName).PD()
 	pdLabels := pdSelector.Copy().UsedByEndUser().Labels()
 
+	//组装pd service的yaml信息
 	pdService := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            svcName,
@@ -496,7 +501,7 @@ func (m *pdMemberManager) getNewPDServiceForTidbCluster(tc *v1alpha1.TidbCluster
 
 	// override fields with user-defined ServiceSpec
 	svcSpec := tc.Spec.PD.Service
-	if svcSpec != nil {
+	if svcSpec != nil { //看要不要从tc里面拿service信息
 		if svcSpec.Type != "" {
 			pdService.Spec.Type = svcSpec.Type
 		}
@@ -1015,6 +1020,7 @@ func (m *FakePDMemberManager) SetSyncError(err error) {
 	m.err = err
 }
 
+// func (m *pdMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 func (m *FakePDMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	if m.err != nil {
 		return m.err

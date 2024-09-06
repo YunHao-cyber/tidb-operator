@@ -176,7 +176,8 @@ func (c *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) 
 	}
 
 	// reconcile TiDB discovery service
-	if err := c.discoveryManager.Reconcile(tc); err != nil {
+	// reconcile discovery组件，该组件内部包含了其他组件在进行进程启动的时候所包含的配置信息.各个组件启动的时候都会向tidb-operator获取启动参数。
+	if err := c.discoveryManager.Reconcile(tc); err != nil { //主要逻辑是创建discovery组件的deployment和service
 		metrics.ClusterUpdateErrors.WithLabelValues(ns, tcName, "discovery").Inc()
 		return err
 	}
@@ -195,7 +196,7 @@ func (c *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) 
 	//   - sync pdms cluster status from pdms to TidbCluster object
 	//   - upgrade the pdms cluster
 	//   - scale out/in the pdms cluster
-	if err := c.pdMSMemberManager.Sync(tc); err != nil {
+	if err := c.pdMSMemberManager.Sync(tc); err != nil { //8.0版本之前的tidb没有pdms组件，先不看这块
 		return err
 	}
 
@@ -210,7 +211,7 @@ func (c *defaultTidbClusterControl) updateTidbCluster(tc *v1alpha1.TidbCluster) 
 	//   - upgrade the pd cluster
 	//   - scale out/in the pd cluster
 	//   - failover the pd cluster
-	if err := c.pdMemberManager.Sync(tc); err != nil {
+	if err := c.pdMemberManager.Sync(tc); err != nil { //pd组件进行sync
 		metrics.ClusterUpdateErrors.WithLabelValues(ns, tcName, "pd").Inc()
 		return err
 	}
