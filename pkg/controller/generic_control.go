@@ -461,11 +461,11 @@ func (c *realGenericControlInterface) CreateOrUpdate(controller, obj client.Obje
 	}
 
 	// 1. try to create and see if there is any conflicts
-	err := c.client.Create(context.TODO(), desired)
-	if errors.IsAlreadyExists(err) {
+	err := c.client.Create(context.TODO(), desired) //创建一下试一试
+	if errors.IsAlreadyExists(err) {                //如果创建的时候发现已存在的话
 
 		// 2. object has already existed, merge our desired changes to it
-		existing, err := EmptyClone(obj)
+		existing, err := EmptyClone(obj) //存在的话，就进行一个被叫做merge的操作,update在下面
 		if err != nil {
 			return nil, err
 		}
@@ -490,7 +490,7 @@ func (c *realGenericControlInterface) CreateOrUpdate(controller, obj client.Obje
 
 		// 5. check if the copy is actually mutated
 		if !apiequality.Semantic.DeepEqual(existing, mutated) {
-			err := c.client.Update(context.TODO(), mutated)
+			err := c.client.Update(context.TODO(), mutated) //*******
 			return mutated, err
 		}
 

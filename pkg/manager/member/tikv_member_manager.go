@@ -109,6 +109,7 @@ func (m *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 		return nil
 	}
 
+	//先确定pd组件的状态
 	if tc.Spec.PD != nil && !tc.PDIsAvailable() {
 		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName)
 	}
@@ -127,6 +128,7 @@ func (m *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 		return err
 	}
 
+	//1、 tikv svc配置（像pd一样，tikv的第一步还是配置svc）
 	svcList := []SvcConfig{
 		{
 			Name:       "peer",
@@ -141,6 +143,8 @@ func (m *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 			return err
 		}
 	}
+
+	//2、 tikv sts配置
 	return m.syncStatefulSetForTidbCluster(tc)
 }
 
@@ -203,7 +207,7 @@ func (m *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
-	oldSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.TiKVMemberName(tcName))
+	oldSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.TiKVMemberName(tcName)) //获取到tikv的sts信息
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("syncStatefulSetForTidbCluster: failed to get sts %s for cluster %s/%s, error: %s", controller.TiKVMemberName(tcName), ns, tcName, err)
 	}
@@ -338,13 +342,13 @@ func getNewServiceForTidbCluster(tc *v1alpha1.TidbCluster, svcConfig SvcConfig) 
 	}
 
 	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{ //svc metadata部分
 			Name:            svcName,
 			Namespace:       ns,
 			Labels:          svcLabel.Labels(),
 			OwnerReferences: []metav1.OwnerReference{controller.GetOwnerRef(tc)},
 		},
-		Spec: corev1.ServiceSpec{
+		Spec: corev1.ServiceSpec{ //svc的spec部分
 			Ports: []corev1.ServicePort{
 				{
 					Name:       svcConfig.Name,
@@ -816,13 +820,14 @@ func (m *tikvMemberManager) syncTiKVClusterStatus(tc *v1alpha1.TidbCluster, set 
 		// skip if not created yet
 		return nil
 	}
-	tc.Status.TiKV.StatefulSet = &set.Status
+	tc.Status.TiKV.StatefulSet = &set.Status //设置状态
 	upgrading, err := m.statefulSetIsUpgradingFn(m.deps.PodLister, m.deps.PDControl, set, tc)
 	if err != nil {
 		return err
 	}
 
 	// If phase changes from UpgradePhase to NormalPhase, try to endEvictLeader for the last store.
+	// 如果phase从UpgradePhase变为NormalPhase，尝试为最后一个store调用endEvictLeader。
 	if !upgrading && tc.Status.TiKV.Phase == v1alpha1.UpgradePhase {
 		if err = endEvictLeader(m.deps, tc, helper.GetMinPodOrdinal(*set.Spec.Replicas, set)); err != nil {
 			return err
@@ -835,8 +840,9 @@ func (m *tikvMemberManager) syncTiKVClusterStatus(tc *v1alpha1.TidbCluster, set 
 	}
 
 	// Scaling takes precedence over upgrading.
+	// 2、变配逻辑
 	if tc.TiKVStsDesiredReplicas() != *set.Spec.Replicas {
-		tc.Status.TiKV.Phase = v1alpha1.ScalePhase
+		tc.Status.TiKV.Phase = v1alpha1.ScalePhase //设置phase为变配
 	} else if upgrading && tc.Status.PD.Phase != v1alpha1.UpgradePhase {
 		if !tc.IsComponentLeaderEvicting(v1alpha1.TiKVMemberType) { // skip upgrade if someone is evicting leader
 			tc.Status.TiKV.Phase = v1alpha1.UpgradePhase
@@ -852,9 +858,9 @@ func (m *tikvMemberManager) syncTiKVClusterStatus(tc *v1alpha1.TidbCluster, set 
 	peerStores := map[string]v1alpha1.TiKVStore{}
 	tombstoneStores := map[string]v1alpha1.TiKVStore{}
 
-	pdCli := controller.GetPDClient(m.deps.PDControl, tc)
+	pdCli := controller.GetPDClient(m.deps.PDControl, tc) //pd client
 	// This only returns Up/Down/Offline stores
-	storesInfo, err := pdCli.GetStores()
+	storesInfo, err := pdCli.GetStores() //获取到集群的store信息
 	if err != nil {
 		if pdapi.IsTiKVNotBootstrappedError(err) {
 			klog.Infof("TiKV of Cluster %s/%s not bootstrapped yet", tc.Namespace, tc.Name)
@@ -871,12 +877,12 @@ func (m *tikvMemberManager) syncTiKVClusterStatus(tc *v1alpha1.TidbCluster, set 
 		return err
 	}
 	for _, store := range storesInfo.Stores {
-		status := getTiKVStore(store)
+		status := getTiKVStore(store) //返回一个store对象
 		if status == nil {
 			continue
 		}
 
-		oldStore, exist := previousStores[status.ID]
+		oldStore, exist := previousStores[status.ID] //判断这个store在老的集群中是否存在
 		if !exist {
 			oldStore, exist = previousPeerStores[status.ID]
 		}
@@ -924,6 +930,7 @@ func (m *tikvMemberManager) syncTiKVClusterStatus(tc *v1alpha1.TidbCluster, set 
 		tombstoneStores[status.ID] = *status
 	}
 
+	//设置tc里面status中tikv的信息
 	tc.Status.TiKV.Synced = true
 	tc.Status.TiKV.Stores = stores
 	tc.Status.TiKV.PeerStores = peerStores

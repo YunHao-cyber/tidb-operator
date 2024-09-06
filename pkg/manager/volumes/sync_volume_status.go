@@ -30,7 +30,7 @@ func SyncVolumeStatus(pvm PodVolumeModifier, podLister corelisterv1.PodLister, t
 		return fmt.Errorf("component status of %s is nil", mt)
 	}
 
-	desiredVolumes, err := pvm.GetDesiredVolumes(tc, mt)
+	desiredVolumes, err := pvm.GetDesiredVolumes(tc, mt) //期望的pvc
 	if err != nil {
 		return fmt.Errorf("failed to get desired volumes: %v", err)
 	}
@@ -40,7 +40,7 @@ func SyncVolumeStatus(pvm PodVolumeModifier, podLister corelisterv1.PodLister, t
 		return fmt.Errorf("failed to get selector: %v", err)
 	}
 
-	pods, err := podLister.Pods(tc.GetNamespace()).List(selector)
+	pods, err := podLister.Pods(tc.GetNamespace()).List(selector) //获取到所有的tikv节点
 	if err != nil {
 		return fmt.Errorf("failed to list pods: %v", err)
 	}
@@ -100,7 +100,21 @@ func observeVolumeStatus(pvm PodVolumeModifier, pods []*v1.Pod, desiredVolumes [
 
 			status, exist := observedStatus[volName]
 			if !exist {
-				observedStatus[volName] = &v1alpha1.ObservedStorageVolumeStatus{
+				/*
+				 volumes:
+				      tikv:
+				        boundCount: 2
+				        currentCapacity: 20Gi
+				        currentCount: 2
+				        currentStorageClass: default
+				        modifiedCapacity: 20Gi
+				        modifiedCount: 2
+				        modifiedStorageClass: default
+				        name: tikv
+				        resizedCapacity: 20Gi
+				        resizedCount: 2
+				*/
+				observedStatus[volName] = &v1alpha1.ObservedStorageVolumeStatus{ //这个结构体其实就是operator实时获取到的tikv的pv信息然后放置到tc的status里面
 					BoundCount:    0,
 					CurrentCount:  0,
 					ModifiedCount: 0,

@@ -194,10 +194,10 @@ func (m *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	tcName := tc.GetName()
 
 	oldPDSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.PDMemberName(tcName)) //获取到ns下面的pd的sts
-	if err != nil && !errors.IsNotFound(err) {                                                         //获取不到就报错，可以看出来，这个sync的过程，是一个基于老的sts更新的过程，并不是从零创建出来的过程
+	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("syncPDStatefulSetForTidbCluster: fail to get sts %s for cluster %s/%s, error: %s", controller.PDMemberName(tcName), ns, tcName, err)
 	}
-	setNotExist := errors.IsNotFound(err)
+	setNotExist := errors.IsNotFound(err) //是否存在老的sts（也就是说判断是新建实例的过程还是说改现有实例tc的过程）
 
 	oldPDSet := oldPDSetTmp.DeepCopy()
 
@@ -212,34 +212,97 @@ func (m *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	}
 
 	//tc是最新的了，然后就开始把tc的最新配置应用到pd下面的各个组件呗，比如cm、sts、pvc啥的
+
+	//1.更新cm，cm里面包含了pd的启动脚本
 	cm, err := m.syncPDConfigMap(tc, oldPDSet)
 	if err != nil {
 		return err
 	}
+
+	//构建pd的sts出来
 	newPDSet, err := getNewPDSetForTidbCluster(tc, cm)
 	if err != nil {
 		return err
 	}
-	if setNotExist {
+
+	if setNotExist { //新建实例的话
 		err = mngerutils.SetStatefulSetLastAppliedConfigAnnotation(newPDSet)
 		if err != nil {
 			return err
 		}
-		if err := m.deps.StatefulSetControl.CreateStatefulSet(tc, newPDSet); err != nil {
+		if err := m.deps.StatefulSetControl.CreateStatefulSet(tc, newPDSet); err != nil { //创建pd的sts
 			return err
 		}
 		tc.Status.PD.StatefulSet = &apps.StatefulSetStatus{}
-		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName)
+		return controller.RequeueErrorf("TidbCluster: [%s/%s], waiting for PD cluster running", ns, tcName) //直接返回
 	}
 
+	// 下面的逻辑是针对已经存在的tidb实例进行更新tc、sts配置的过程
 	// Force update takes precedence over scaling because force upgrade won't take effect when cluster gets stuck at scaling
+	// 让tidb版本升级的逻辑优先级高于变配，因为变配过程没做完的话，升级也不会进行
+
+	//1、处理升级逻辑
 	if !tc.Status.PD.Synced && !templateEqual(newPDSet, oldPDSet) {
 		// upgrade forced only when `Synced` is false, because unable to upgrade gracefully
-		forceUpgradeAnnoSet := NeedForceUpgrade(tc.Annotations)
+		/*
+				升级过程中pd的status信息:
+			pd:
+			    image: hub.jdcloud.com/tidb/pd:v6.5.8-05f94b2
+			    leader:
+			      clientURL: http://tidb-4cqy4tefep-pd-0.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379
+			      health: true
+			      id: "2197499305875197257"
+			      lastTransitionTime: "2024-08-08T08:33:44Z"
+			      name: tidb-4cqy4tefep-pd-0
+			    members:
+			      tidb-4cqy4tefep-pd-0:
+			        clientURL: http://tidb-4cqy4tefep-pd-0.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379
+			        health: true
+			        id: "2197499305875197257"
+			        lastTransitionTime: "2024-08-08T08:33:44Z"
+			        name: tidb-4cqy4tefep-pd-0
+			      tidb-4cqy4tefep-pd-1:
+			        clientURL: http://tidb-4cqy4tefep-pd-1.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379
+			        health: true
+			        id: "13124242843153742462"
+			        lastTransitionTime: "2024-08-08T08:33:44Z"
+			        name: tidb-4cqy4tefep-pd-1
+			      tidb-4cqy4tefep-pd-2:
+			        clientURL: http://tidb-4cqy4tefep-pd-2.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379
+			        health: false
+			        id: "3978176930332030335"
+			        lastTransitionTime: "2024-09-06T09:25:11Z"
+			        name: tidb-4cqy4tefep-pd-2
+			    phase: Upgrade *****************************************这里********************************************
+			    statefulSet:
+			      collisionCount: 0
+			      currentReplicas: 2
+			      currentRevision: tidb-4cqy4tefep-pd-5784cb95b4
+			      observedGeneration: 3
+			      readyReplicas: 2
+			      replicas: 3
+			      updateRevision: tidb-4cqy4tefep-pd-6978dc5954
+			      updatedReplicas: 1
+			    synced: true
+			    volumes:
+			      pd:
+			        boundCount: 3
+			        currentCapacity: 100Gi
+			        currentCount: 3
+			        currentStorageClass: jdcloud-lvm
+			        modifiedCapacity: 100Gi
+			        modifiedCount: 3
+			        modifiedStorageClass: jdcloud-lvm
+			        name: pd
+			        resizedCapacity: 100Gi
+			        resizedCount: 3
+
+		*/
+		forceUpgradeAnnoSet := NeedForceUpgrade(tc.Annotations)                        //判断是否进行升级操作
 		onlyOnePD := *oldPDSet.Spec.Replicas < 2 && len(tc.Status.PD.PeerMembers) == 0 // it's acceptable to use old record about peer members
 
 		if forceUpgradeAnnoSet || onlyOnePD {
-			tc.Status.PD.Phase = v1alpha1.UpgradePhase
+			tc.Status.PD.Phase = v1alpha1.UpgradePhase //把pd状态设置为升级
 			mngerutils.SetUpgradePartition(newPDSet, 0)
 			errSTS := mngerutils.UpdateStatefulSet(m.deps.StatefulSetControl, tc, newPDSet, oldPDSet)
 			return controller.RequeueErrorf("tidbcluster: [%s/%s]'s pd needs force upgrade, %v", ns, tcName, errSTS)
@@ -251,10 +314,15 @@ func (m *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	//   new replicas
 	// - it's ok to scale in the middle of upgrading (in statefulset controller
 	//   scaling takes precedence over upgrading too)
+	// 扩展优先于升级，因为:
+	// —如果pd升级失败，用户可能需要删除pd或添加新的副本
+	// -可以在升级过程中进行扩展(在statefulset中，控制器的扩展优先于升级)
+	// 2、 处理变配逻辑
 	if err := m.scaler.Scale(tc, oldPDSet, newPDSet); err != nil {
 		return err
 	}
 
+	// 3、故障转移逻辑
 	if m.deps.CLIConfig.AutoFailover {
 		if m.shouldRecover(tc) {
 			m.failover.Recover(tc)
@@ -268,6 +336,7 @@ func (m *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	if tc.Status.PD.VolReplaceInProgress {
 		// Volume Replace in Progress, so do not make any changes to Sts spec, overwrite with old pod spec
 		// config as we are not ready to upgrade yet.
+		// 卷替换正在进行中，所以不要对Sts规范做任何更改，用旧的pod规范配置覆盖，因为我们还没有准备好升级。
 		_, podSpec, err := GetLastAppliedConfig(oldPDSet)
 		if err != nil {
 			return err
@@ -503,7 +572,7 @@ func (m *pdMemberManager) syncPDConfigMap(tc *v1alpha1.TidbCluster, set *apps.St
 	if err != nil {
 		return nil, err
 	}
-	return m.deps.TypedControl.CreateOrUpdateConfigMap(tc, newCm)
+	return m.deps.TypedControl.CreateOrUpdateConfigMap(tc, newCm) //创建或者更新cm
 }
 
 func (m *pdMemberManager) getNewPDServiceForTidbCluster(tc *v1alpha1.TidbCluster) *corev1.Service {
@@ -643,19 +712,22 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		pdConfigMap = cm.Name
 	}
 
+	//operator要求tidb的版本得大于等于4
 	clusterVersionGE4, err := clusterVersionGreaterThanOrEqualTo4(tc.PDVersion(), tc.Spec.PD.Mode)
 	if err != nil {
 		klog.V(4).Infof("cluster version: %s is not semantic versioning compatible", tc.PDVersion())
 	}
 
-	annMount, annVolume := annotationsMountVolume()
+	annMount, annVolume := annotationsMountVolume() //把pd pod的metadata.annotation注入到pd容器里面去。返回volume mount mount和volume
 	dataVolumeName := string(v1alpha1.GetStorageVolumeName("", v1alpha1.PDMemberType))
-	volMounts := []corev1.VolumeMount{
+	volMounts := []corev1.VolumeMount{ //挂载这些个东西到pod里面去
 		annMount,
 		{Name: "config", ReadOnly: true, MountPath: "/etc/pd"},
 		{Name: "startup-script", ReadOnly: true, MountPath: "/usr/local/bin"},
 		{Name: dataVolumeName, MountPath: constants.PDDataVolumeMountPath},
 	}
+
+	//===========tls安全部分跳过不看
 	if tc.IsTLSClusterEnabled() {
 		volMounts = append(volMounts, corev1.VolumeMount{
 			Name: "pd-tls", ReadOnly: true, MountPath: "/var/lib/pd-tls",
@@ -671,6 +743,7 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 			Name: "tidb-client-tls", ReadOnly: true, MountPath: tidbClientCertPath,
 		})
 	}
+	//===========tls安全部分跳过不看
 
 	vols := []corev1.Volume{
 		annVolume,
@@ -723,6 +796,7 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		})
 	}
 	// handle StorageVolumes and AdditionalVolumeMounts in ComponentSpec
+
 	storageVolMounts, additionalPVCs := util.BuildStorageVolumeAndVolumeMount(tc.Spec.PD.StorageVolumes, tc.Spec.PD.StorageClassName, v1alpha1.PDMemberType)
 	volMounts = append(volMounts, storageVolMounts...)
 	volMounts = append(volMounts, tc.Spec.PD.AdditionalVolumeMounts...)
@@ -766,7 +840,7 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		podSecurityContext.Sysctls = []corev1.Sysctl{}
 	}
 
-	storageRequest, err := controller.ParseStorageRequest(tc.Spec.PD.Requests)
+	storageRequest, err := controller.ParseStorageRequest(tc.Spec.PD.Requests) //pd磁盘使用
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse storage request for PD, tidbcluster %s/%s, error: %v", tc.Namespace, tc.Name, err)
 	}
@@ -884,6 +958,7 @@ func getNewPDSetForTidbCluster(tc *v1alpha1.TidbCluster, cm *corev1.ConfigMap) (
 		}
 	}
 
+	//构建最终pd的sts出来
 	pdSet := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            setName,

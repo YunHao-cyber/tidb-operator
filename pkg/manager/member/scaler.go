@@ -64,13 +64,13 @@ func (s *generalScaler) deleteDeferDeletingPVC(controller runtime.Object, member
 		return skipReason, fmt.Errorf("%s %s/%s assemble label selector failed, err: %v", kind, ns, meta.GetName(), err)
 	}
 
-	pvcs, err := s.deps.PVCLister.PersistentVolumeClaims(ns).List(selector)
+	pvcs, err := s.deps.PVCLister.PersistentVolumeClaims(ns).List(selector) //根据selector列出来pvc信息。但是扩容操作是找不到pvc的，因为pvc还没建出来
 	if err != nil {
 		msg := fmt.Sprintf("%s %s/%s list pvc failed, selector: %s, err: %v", kind, ns, meta.GetName(), selector, err)
 		klog.Error(msg)
 		return skipReason, fmt.Errorf(msg)
 	}
-	if len(pvcs) == 0 {
+	if len(pvcs) == 0 { //获取不到的话，就证明是个扩容的操作。就直接返回
 		klog.Infof("%s %s/%s list pvc not found, selector: %s", kind, ns, meta.GetName(), selector)
 		podName := ordinalPodName(memberType, meta.GetName(), ordinal)
 		skipReason[podName] = skipReasonScalerPVCNotFound
@@ -90,7 +90,7 @@ func (s *generalScaler) deleteDeferDeletingPVC(controller runtime.Object, member
 			continue
 		}
 
-		err = s.deps.PVCControl.DeletePVC(controller, pvc)
+		err = s.deps.PVCControl.DeletePVC(controller, pvc) //清理pvc
 		if err != nil {
 			klog.Errorf("Scale out: failed to delete pvc %s/%s, %v", ns, pvcName, err)
 			return skipReason, err
@@ -172,7 +172,7 @@ func ordinalPodName(memberType v1alpha1.MemberType, tcName string, ordinal int32
 }
 
 // scaleOne calculates desired replicas and delete slots from actual/desired
-// stateful sets by allowing only one pod to be deleted or created
+// stateful sets by allowing only one pod to be deleted or created 每次扩缩容都是一个一个进行
 // it returns following values:
 // - scaling:
 //   - 0: no scaling required
@@ -187,7 +187,8 @@ func scaleOne(actual *apps.StatefulSet, desired *apps.StatefulSet) (scaling int,
 	if len(ordinals) == 0 {
 		ordinal = -1
 	} else {
-		ordinal = ordinals[0]
+		//确实存在扩容或缩容的话逻辑会到这里
+		ordinal = ordinals[0] //只拿一个
 	}
 	return
 }
@@ -203,10 +204,12 @@ func scaleOne(actual *apps.StatefulSet, desired *apps.StatefulSet) (scaling int,
 // - ordinals: pod ordinals to create or delete
 // - replicas/deleteSlots: desired replicas and deleteSlots by allowing no more than maxCount pods to be deleted or created
 func scaleMulti(actual *apps.StatefulSet, desired *apps.StatefulSet, maxCount int) (scaling int, ordinals []int32, replicas int32, deleteSlots sets.Int32) {
-	actualPodOrdinals := helper.GetPodOrdinals(*actual.Spec.Replicas, actual)
-	desiredPodOrdinals := helper.GetPodOrdinals(*desired.Spec.Replicas, desired)
-	additions := desiredPodOrdinals.Difference(actualPodOrdinals)
-	deletions := actualPodOrdinals.Difference(desiredPodOrdinals)
+	actualPodOrdinals := helper.GetPodOrdinals(*actual.Spec.Replicas, actual)    //实际的pd副本数
+	desiredPodOrdinals := helper.GetPodOrdinals(*desired.Spec.Replicas, desired) //期望的pd副本数
+
+	//把期望的和实际的pd副本数进行集合对比的操作来判断是扩容还是缩容操作
+	additions := desiredPodOrdinals.Difference(actualPodOrdinals) //期望的pd副本有但是实际没有的，那就是扩容
+	deletions := actualPodOrdinals.Difference(desiredPodOrdinals) //实际有但是期望的没有，那就是缩容。很容易理解
 	scaling = 0
 	ordinals = make([]int32, 0, maxCount)
 	replicas = *actual.Spec.Replicas
@@ -218,9 +221,9 @@ func scaleMulti(actual *apps.StatefulSet, desired *apps.StatefulSet, maxCount in
 			actualDeleteSlots.Insert(i)
 		}
 	}
-	if additions.Len() > 0 {
+	if additions.Len() > 0 { //扩容
 		// we always do scaling out before scaling in to maintain maximum availability
-		scaling = scalingOutFlag
+		scaling = scalingOutFlag //1
 		additionsList := additions.List()
 		for i := 0; i < len(additionsList) && i < maxCount; i++ {
 			ordinal := additionsList[i]
@@ -232,7 +235,7 @@ func scaleMulti(actual *apps.StatefulSet, desired *apps.StatefulSet, maxCount in
 			}
 		}
 		actualDeleteSlots = normalizeDeleteSlots(replicas, actualDeleteSlots, desiredDeleteSlots)
-	} else if deletions.Len() > 0 {
+	} else if deletions.Len() > 0 { //缩容
 		scaling = scalingInFlag
 		deletionsList := deletions.List()
 		stop := len(deletionsList) - maxCount

@@ -41,9 +41,9 @@ func NewPDScaler(deps *controller.Dependencies) Scaler {
 func (s *pdScaler) Scale(meta metav1.Object, oldSet *apps.StatefulSet, newSet *apps.StatefulSet) error {
 	scaling, _, _, _ := scaleOne(oldSet, newSet)
 	if scaling > 0 {
-		return s.ScaleOut(meta, oldSet, newSet)
+		return s.ScaleOut(meta, oldSet, newSet) //扩容
 	} else if scaling < 0 {
-		return s.ScaleIn(meta, oldSet, newSet)
+		return s.ScaleIn(meta, oldSet, newSet) //缩容
 	}
 	return nil
 }
@@ -54,18 +54,18 @@ func (s *pdScaler) ScaleOut(meta metav1.Object, oldSet *apps.StatefulSet, newSet
 		return nil
 	}
 
-	_, ordinal, replicas, deleteSlots := scaleOne(oldSet, newSet)
+	_, ordinal, replicas, deleteSlots := scaleOne(oldSet, newSet) //
 	resetReplicas(newSet, oldSet)
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
 	klog.Infof("scaling out pd statefulset %s/%s, ordinal: %d (replicas: %d, delete slots: %v)", oldSet.Namespace, oldSet.Name, ordinal, replicas, deleteSlots.List())
-	_, err := s.deleteDeferDeletingPVC(tc, v1alpha1.PDMemberType, ordinal)
+	_, err := s.deleteDeferDeletingPVC(tc, v1alpha1.PDMemberType, ordinal) //根据ordinal的pod 索引清理pvc
 	if err != nil {
 		return err
 	}
 
-	if !tc.Status.PD.Synced {
+	if !tc.Status.PD.Synced { //完毕之后，tc-status-pd的syncd信息应该为true
 		return fmt.Errorf("TidbCluster: %s/%s's pd status sync failed, can't scale out now", ns, tcName)
 	}
 
@@ -97,7 +97,7 @@ func (s *pdScaler) ScaleIn(meta metav1.Object, oldSet *apps.StatefulSet, newSet 
 	// limit scale in when multi-cluster is enabled
 	if pass := s.preCheckUpMembers(tc, pdPodName); !pass {
 		return nil
-	}
+	} //pd的数量必须大于等于1
 
 	pdClient := controller.GetPDClient(s.deps.PDControl, tc)
 	leader, err := pdClient.GetPDLeader()
@@ -136,7 +136,7 @@ func (s *pdScaler) ScaleIn(meta metav1.Object, oldSet *apps.StatefulSet, newSet 
 		}
 	}
 
-	err = pdClient.DeleteMember(memberName)
+	err = pdClient.DeleteMember(memberName) //pd-ctl delete member的操作
 	if err != nil {
 		klog.Errorf("pdScaler.ScaleIn: failed to delete member %s, %v", memberName, err)
 		return err
@@ -148,7 +148,7 @@ func (s *pdScaler) ScaleIn(meta metav1.Object, oldSet *apps.StatefulSet, newSet 
 		return fmt.Errorf("pdScaler.ScaleIn: failed to get pod %s/%s for pd in tc %s/%s, error: %s", ns, pdPodName, ns, tcName, err)
 	}
 
-	pvcs, err := util.ResolvePVCFromPod(pod, s.deps.PVCLister)
+	pvcs, err := util.ResolvePVCFromPod(pod, s.deps.PVCLister) //清理pod的pvc
 	if err != nil {
 		return fmt.Errorf("pdScaler.ScaleIn: failed to get pvcs for pod %s/%s in tc %s/%s, error: %s", ns, pod.Name, ns, tcName, err)
 	}

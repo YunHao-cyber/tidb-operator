@@ -89,7 +89,7 @@ func (c *realStatefulSetControl) UpdateStatefulSet(controller runtime.Object, se
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// TODO: verify if StatefulSet identity(name, namespace, labels) matches TidbCluster
 		var updateErr error
-		updatedSS, updateErr = c.kubeCli.AppsV1().StatefulSets(namespace).Update(context.TODO(), set, metav1.UpdateOptions{})
+		updatedSS, updateErr = c.kubeCli.AppsV1().StatefulSets(namespace).Update(context.TODO(), set, metav1.UpdateOptions{}) //*******升级*******
 		if updateErr == nil {
 			klog.Infof("%s: [%s/%s]'s StatefulSet: [%s/%s] updated successfully", kind, namespace, name, namespace, setName)
 			return nil

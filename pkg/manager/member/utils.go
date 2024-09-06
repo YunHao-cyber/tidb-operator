@@ -61,14 +61,32 @@ var (
 
 func annotationsMountVolume() (corev1.VolumeMount, corev1.Volume) {
 	m := corev1.VolumeMount{Name: "annotations", ReadOnly: true, MountPath: "/etc/podinfo"}
+	/*
+		jvessel.jdcloud.com/userpin="amRf5pWw5o2u5bqT5rWL6K+VXzAwQQ=="
+		prometheus.io/path="/metrics"
+		prometheus.io/port="2379"
+		prometheus.io/scheme="http"
+		prometheus.io/scrape="true"
+	*/
 	v := corev1.Volume{
 		Name: "annotations",
 		VolumeSource: corev1.VolumeSource{
 			DownwardAPI: &corev1.DownwardAPIVolumeSource{
-				Items: []corev1.DownwardAPIVolumeFile{
+				Items: []corev1.DownwardAPIVolumeFile{ //这个配置的作用是为了在容器内获取Pod级别的信息，Kubernetes提供了Downward API机制来将Pod和容器的某些元数据信息注入容器环境内，供容器应用方便地使用。
 					{
+						/*
+						 volumes:
+						  - downwardAPI:
+						      defaultMode: 420
+						      items:
+						      - fieldRef:
+						          apiVersion: v1
+						          fieldPath: metadata.annotations
+						        path: annotations
+						    name: annotations
+						*/
 						Path:     "annotations",
-						FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations"},
+						FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations"}, //把pd pod的metadata.annotation注入到容器里面去(通过挂载的方式)
 					},
 				},
 			},
@@ -467,7 +485,7 @@ func GetPVCSelectorForPod(controller runtime.Object, memberType v1alpha1.MemberT
 	var l label.Label
 	switch controller.(type) {
 	case *v1alpha1.TidbCluster:
-		podName = ordinalPodName(memberType, meta.GetName(), ordinal)
+		podName = ordinalPodName(memberType, meta.GetName(), ordinal) //拼出来pod name，如果是扩容的话，就比如是pd-1
 		l = label.New().Instance(meta.GetName())
 		l[label.AnnPodNameKey] = podName
 	case *v1alpha1.DMCluster:

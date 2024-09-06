@@ -172,6 +172,7 @@ func UpdateStatefulSet(setCtl controller.StatefulSetControlInterface, object run
 	}
 
 	// commit to k8s
+	// 通过kube apiserver请求k8s升级pd sts操作
 	_, err = setCtl.UpdateStatefulSet(object, &set)
 	return err
 }
