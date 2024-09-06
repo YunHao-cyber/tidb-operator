@@ -116,6 +116,7 @@ func (c *defaultTidbClusterControl) UpdateTidbCluster(tc *v1alpha1.TidbCluster) 
 	var errs []error
 	oldStatus := tc.Status.DeepCopy()
 
+	// sync tc资源
 	if err := c.updateTidbCluster(tc); err != nil {
 		errs = append(errs, err)
 	}

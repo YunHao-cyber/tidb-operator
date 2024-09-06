@@ -174,7 +174,7 @@ func main() {
 		// Initialize all controllers
 		// 初始化各个组件的controller，各个组件的controller会循环执行（不退出）接收到对应组件的资源变更事件之后，就会被指定的controller去处理
 		controllers := []Controller{
-			tidbcluster.NewController(deps),
+			tidbcluster.NewController(deps), //核心函数进去看
 			tidbcluster.NewPodController(deps),
 			dmcluster.NewController(deps),
 			backup.NewController(deps),
@@ -209,7 +209,7 @@ func main() {
 		for _, controller := range controllers {
 			c := controller
 			initMetrics(c)
-			go wait.Forever(func() { c.Run(cliCfg.Workers, ctx.Done()) }, cliCfg.WaitDuration)
+			go wait.Forever(func() { c.Run(cliCfg.Workers, ctx.Done()) }, cliCfg.WaitDuration) //调用各个controller的run函数，开始执行内部逻辑
 		}
 	}
 	onStopped := func() {

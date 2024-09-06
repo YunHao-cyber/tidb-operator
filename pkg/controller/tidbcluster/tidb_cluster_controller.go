@@ -80,6 +80,7 @@ func NewController(deps *controller.Dependencies) *Controller {
 		),
 	}
 
+	//注册informer，informer的作用是和kube-apiserver进行交互，然后捕捉到触发了cr资源变更的事件，把涉及到的cr资源的key信息放置到待sync的队列中
 	tidbClusterInformer := deps.InformerFactory.Pingcap().V1alpha1().TidbClusters()
 	statefulsetInformer := deps.KubeInformerFactory.Apps().V1().StatefulSets()
 	tidbClusterInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -114,7 +115,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) {
 	defer klog.Info("Shutting down tidbcluster controller")
 
 	for i := 0; i < workers; i++ {
-		go wait.Until(c.worker, time.Second, stopCh)
+		go wait.Until(c.worker, time.Second, stopCh) //启动worker处理工作队列
 	}
 
 	<-stopCh
@@ -137,7 +138,7 @@ func (c *Controller) processNextWorkItem() bool {
 		return false
 	}
 	defer c.queue.Done(key)
-	if err := c.sync(key.(string)); err != nil {
+	if err := c.sync(key.(string)); err != nil { //针对触发了变更的资源，进行sync操作
 		if perrors.Find(err, controller.IsRequeueError) != nil {
 			klog.Infof("TidbCluster: %v, still need sync: %v, requeuing", key.(string), err)
 		} else {
