@@ -193,23 +193,25 @@ func (m *pdMemberManager) syncPDStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 	ns := tc.GetNamespace()
 	tcName := tc.GetName()
 
-	oldPDSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.PDMemberName(tcName))
-	if err != nil && !errors.IsNotFound(err) {
+	oldPDSetTmp, err := m.deps.StatefulSetLister.StatefulSets(ns).Get(controller.PDMemberName(tcName)) //获取到ns下面的pd的sts
+	if err != nil && !errors.IsNotFound(err) {                                                         //获取不到就报错，可以看出来，这个sync的过程，是一个基于老的sts更新的过程，并不是从零创建出来的过程
 		return fmt.Errorf("syncPDStatefulSetForTidbCluster: fail to get sts %s for cluster %s/%s, error: %s", controller.PDMemberName(tcName), ns, tcName, err)
 	}
 	setNotExist := errors.IsNotFound(err)
 
 	oldPDSet := oldPDSetTmp.DeepCopy()
 
-	if err := m.syncTidbClusterStatus(tc, oldPDSet); err != nil {
+	if err := m.syncTidbClusterStatus(tc, oldPDSet); err != nil { //从pd里面获取到member的最新信息然后更新到tc
 		klog.Errorf("failed to sync TidbCluster: [%s/%s]'s status, error: %v", ns, tcName, err)
 	}
 
+	//如果暂停就不sync了
 	if tc.Spec.Paused {
 		klog.V(4).Infof("tidb cluster %s/%s is paused, skip syncing for pd statefulset", tc.GetNamespace(), tc.GetName())
 		return nil
 	}
 
+	//tc是最新的了，然后就开始把tc的最新配置应用到pd下面的各个组件呗，比如cm、sts、pvc啥的
 	cm, err := m.syncPDConfigMap(tc, oldPDSet)
 	if err != nil {
 		return err
@@ -335,17 +337,46 @@ func (m *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *a
 	}
 
 	// Scaling takes precedence over upgrading.
+	//更新tc里面pd的状态，这一步很重要哦。因为后续对于pd的扩缩容、Failover、升级等操作都会依赖tc中的Status字段的值来进行决策。
 	if tc.PDStsDesiredReplicas() != *set.Spec.Replicas {
-		tc.Status.PD.Phase = v1alpha1.ScalePhase
+		tc.Status.PD.Phase = v1alpha1.ScalePhase //扩缩容
 	} else if upgrading {
-		tc.Status.PD.Phase = v1alpha1.UpgradePhase
+		tc.Status.PD.Phase = v1alpha1.UpgradePhase //升级
 	} else {
 		tc.Status.PD.Phase = v1alpha1.NormalPhase
 	}
 
-	pdClient := controller.GetPDClient(m.deps.PDControl, tc)
+	pdClient := controller.GetPDClient(m.deps.PDControl, tc) //获取pd client，其实是个pd的svc域名
 
-	healthInfo, err := pdClient.GetHealth()
+	healthInfo, err := pdClient.GetHealth() //获取集群健康度
+	/*
+			[
+		  {
+		    "name": "tidb-4cqy4tefep-pd-0",
+		    "member_id": 2197499305875197257,
+		    "client_urls": [
+		      "http://tidb-4cqy4tefep-pd-0.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379"
+		    ],
+		    "health": true
+		  },
+		  {
+		    "name": "tidb-4cqy4tefep-pd-2",
+		    "member_id": 3978176930332030335,
+		    "client_urls": [
+		      "http://tidb-4cqy4tefep-pd-2.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379"
+		    ],
+		    "health": true
+		  },
+		  {
+		    "name": "tidb-4cqy4tefep-pd-1",
+		    "member_id": 13124242843153742462,
+		    "client_urls": [
+		      "http://tidb-4cqy4tefep-pd-1.tidb-4cqy4tefep-pd-peer.tidb-4cqy4tefep.svc:2379"
+		    ],
+		    "health": true
+		  }
+		]
+	*/
 
 	if err != nil {
 		tc.Status.PD.Synced = false
@@ -361,13 +392,19 @@ func (m *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *a
 		return err
 	}
 
+	/*
+			{
+		  	"id": 7400683975866343221,
+		  	"max_peer_count": 3
+			}
+	*/
 	cluster, err := pdClient.GetCluster()
 	if err != nil {
 		tc.Status.PD.Synced = false
 		return err
 	}
-	tc.Status.ClusterID = strconv.FormatUint(cluster.Id, 10)
-	leader, err := pdClient.GetPDLeader()
+	tc.Status.ClusterID = strconv.FormatUint(cluster.Id, 10) //设置tc里面status中的集群id信息，从pd内部获取来
+	leader, err := pdClient.GetPDLeader()                    //获取pd leader
 	if err != nil {
 		tc.Status.PD.Synced = false
 		return err
@@ -379,7 +416,7 @@ func (m *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *a
 	}
 	pdStatus := map[string]v1alpha1.PDMember{}
 	peerPDStatus := map[string]v1alpha1.PDMember{}
-	for _, memberHealth := range healthInfo.Healths {
+	for _, memberHealth := range healthInfo.Healths { // 这块逻辑就是从pd里面获取到各个member信息，然后更新到tc的status里面去
 		memberID := memberHealth.MemberID
 		var clientURL string
 		if len(memberHealth.ClientUrls) > 0 {
@@ -420,7 +457,7 @@ func (m *pdMemberManager) syncTidbClusterStatus(tc *v1alpha1.TidbCluster, set *a
 		}
 	}
 
-	tc.Status.PD.Synced = true
+	tc.Status.PD.Synced = true //sync完了设置为true
 	tc.Status.PD.Members = pdStatus
 	tc.Status.PD.PeerMembers = peerPDStatus
 	tc.Status.PD.Image = ""
