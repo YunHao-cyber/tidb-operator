@@ -58,7 +58,7 @@ type defaultBackupControl struct {
 // UpdateBackup executes the core logic loop for a Backup.
 func (c *defaultBackupControl) UpdateBackup(backup *v1alpha1.Backup) error {
 	backup.SetGroupVersionKind(controller.BackupControllerKind)
-	if err := c.addProtectionFinalizer(backup); err != nil {
+	if err := c.addProtectionFinalizer(backup); err != nil { //添加Finalizer，不能在备份过程中被删掉
 		return err
 	}
 
@@ -83,7 +83,7 @@ func (c *defaultBackupControl) addProtectionFinalizer(backup *v1alpha1.Backup) e
 	ns := backup.GetNamespace()
 	name := backup.GetName()
 
-	if needToAddFinalizer(backup) {
+	if needToAddFinalizer(backup) { //要删除的bk加个finalizer的注解
 		backup.Finalizers = append(backup.Finalizers, label.BackupProtectionFinalizer)
 		_, err := c.cli.PingcapV1alpha1().Backups(ns).Update(context.TODO(), backup, metav1.UpdateOptions{})
 		if err != nil {
@@ -110,6 +110,7 @@ func (c *defaultBackupControl) removeProtectionFinalizer(backup *v1alpha1.Backup
 }
 
 func needToAddFinalizer(backup *v1alpha1.Backup) bool {
+	//如果没有删除时间戳，并且bk的清理策略为delete或者失败删除，并且bk资源没有被finalizers保护的话就返回true
 	return backup.DeletionTimestamp == nil && v1alpha1.IsCleanCandidate(backup) && !k8s.ContainsString(backup.Finalizers, label.BackupProtectionFinalizer, nil)
 }
 

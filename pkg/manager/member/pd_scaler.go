@@ -60,7 +60,7 @@ func (s *pdScaler) ScaleOut(meta metav1.Object, oldSet *apps.StatefulSet, newSet
 	tcName := tc.GetName()
 
 	klog.Infof("scaling out pd statefulset %s/%s, ordinal: %d (replicas: %d, delete slots: %v)", oldSet.Namespace, oldSet.Name, ordinal, replicas, deleteSlots.List())
-	_, err := s.deleteDeferDeletingPVC(tc, v1alpha1.PDMemberType, ordinal) //根据ordinal的pod 索引清理pvc
+	_, err := s.deleteDeferDeletingPVC(tc, v1alpha1.PDMemberType, ordinal) //根据ordinal的pod 索引清理pvc（这里是清理掉之前可能残留的旧的pvc，比如之前有个pd-1，缩容只剩pd-0，之后再扩容的话，就需要把之前pd-1的pvc清理掉）
 	if err != nil {
 		return err
 	}

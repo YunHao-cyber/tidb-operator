@@ -136,7 +136,7 @@ func (c *Controller) sync(key string) error {
 	if err != nil {
 		return err
 	}
-	backup, err := c.deps.BackupLister.Backups(ns).Get(name)
+	backup, err := c.deps.BackupLister.Backups(ns).Get(name) //拿bk
 	if errors.IsNotFound(err) {
 		klog.Infof("Backup has been deleted %v", key)
 		return nil

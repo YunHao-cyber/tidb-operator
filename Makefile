@@ -39,7 +39,7 @@ default: build
 
 ifeq ($(NO_BUILD),y)
 operator-docker:
-	@echo "NO_BUILD=y, skip build for $@"
+	@echo "NO_BUILD=y, skip build for $@"ssh-keygen -t ed25519 -C "工作邮箱，比如：zhansan@jd.com"
 else
 operator-docker: build
 endif

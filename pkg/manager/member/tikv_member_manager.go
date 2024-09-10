@@ -99,6 +99,7 @@ func (m *tikvMemberManager) Sync(tc *v1alpha1.TidbCluster) error {
 	tcName := tc.GetName()
 
 	// skip sync if tikv is suspended
+	//判断是否停止同步
 	component := v1alpha1.TiKVMemberType
 	needSuspend, err := m.suspender.SuspendComponent(tc, component)
 	if err != nil {
@@ -215,6 +216,7 @@ func (m *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 
 	oldSet := oldSetTmp.DeepCopy()
 
+	//同步tikv的status信息
 	if err := m.syncTiKVClusterStatus(tc, oldSet); err != nil {
 		return err
 	}
@@ -256,6 +258,7 @@ func (m *tikvMemberManager) syncStatefulSetForTidbCluster(tc *v1alpha1.TidbClust
 		return nil
 	}
 
+	//给 store打标
 	if _, err := m.setStoreLabelsForTiKV(tc); err != nil {
 		return err
 	}
@@ -1020,12 +1023,33 @@ func (m *tikvMemberManager) setStoreLabelsForTiKV(tc *v1alpha1.TidbCluster) (int
 		}
 
 		nodeName := pod.Spec.NodeName
+		/*
+			  beta.kubernetes.io/arch=amd64
+			beta.kubernetes.io/instance-type=g.n2.4xlarge
+			beta.kubernetes.io/os=linux
+			db.jdcloud.com/disk-type=nvme
+			failure-domain.beta.kubernetes.io/jke-fd=3
+			failure-domain.beta.kubernetes.io/jke-nodegroup=ng-gl68i21qgf
+			failure-domain.beta.kubernetes.io/region=cn-east-2
+			failure-domain.beta.kubernetes.io/zone=cn-east-2a
+			group=default
+			kubernetes.io/arch=amd64
+			kubernetes.io/hostname=k8s-node-vmptlk-gl68i21qgf
+			kubernetes.io/os=linux
+			node.kubernetes.io/instance-type=g.n2.4xlarge
+			topology.kubernetes.io/jdcloud-fd=3
+			topology.kubernetes.io/jdcloud-ng=ng-gl68i21qgf
+			topology.kubernetes.io/region=cn-east-2
+			topology.kubernetes.io/zone=cn-east-2a
+			topology.zbs.csi.jdcloud.com/zone=cn-east-2b
+		*/
 		ls, err := getNodeLabels(m.deps.NodeLister, nodeName, storeLabels)
 		if err != nil || len(ls) == 0 {
 			klog.Warningf("node: [%s] has no node labels %v, skipping set store labels for Pod: [%s/%s]", nodeName, storeLabels, ns, podName)
 			continue
 		}
 
+		//把node label的store的label的值保持一致
 		if !m.storeLabelsEqualNodeLabels(store.Store.Labels, ls) {
 			set, err := pdCli.SetStoreLabels(store.Store.Id, ls)
 			if err != nil {

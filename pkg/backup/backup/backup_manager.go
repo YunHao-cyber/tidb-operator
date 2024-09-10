@@ -161,7 +161,7 @@ func (bm *backupManager) syncBackupJob(backup *v1alpha1.Backup) error {
 	var job *batchv1.Job
 	var reason string
 	var updateStatus *controller.BackupUpdateStatus
-	if job, updateStatus, reason, err = bm.makeBackupJob(backup); err != nil {
+	if job, updateStatus, reason, err = bm.makeBackupJob(backup); err != nil { //创建备份job去进行备份操作
 		klog.Errorf("backup %s/%s create job %s failed, reason is %s, error %v.", ns, name, backupJobName, reason, err)
 		return err
 	}

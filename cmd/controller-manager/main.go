@@ -174,12 +174,12 @@ func main() {
 		// Initialize all controllers
 		// 初始化各个组件的controller，各个组件的controller会循环执行（不退出）接收到对应组件的资源变更事件之后，就会被指定的controller去处理
 		controllers := []Controller{
-			tidbcluster.NewController(deps), //核心函数进去看
-			tidbcluster.NewPodController(deps),
+			tidbcluster.NewController(deps),    //核心函数进去看 √
+			tidbcluster.NewPodController(deps), //√
 			dmcluster.NewController(deps),
-			backup.NewController(deps),
+			backup.NewController(deps), //√
 			restore.NewController(deps),
-			backupschedule.NewController(deps),
+			backupschedule.NewController(deps), // bks
 			tidbinitializer.NewController(deps),
 			tidbmonitor.NewController(deps),
 			tidbngmonitoring.NewController(deps),

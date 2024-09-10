@@ -152,7 +152,7 @@ func resetReplicas(newSet *apps.StatefulSet, oldSet *apps.StatefulSet) {
 
 func setReplicasAndDeleteSlots(newSet *apps.StatefulSet, replicas int32, deleteSlots sets.Int32) {
 	oldReplicas := *newSet.Spec.Replicas
-	*newSet.Spec.Replicas = replicas
+	*newSet.Spec.Replicas = replicas //调整新的sts里面的replica配置
 	if features.DefaultFeatureGate.Enabled(features.AdvancedStatefulSet) {
 		helper.SetDeleteSlots(newSet, deleteSlots)
 		klog.Infof("scale statefulset: %s/%s replicas from %d to %d (delete slots: %v)",
