@@ -78,15 +78,15 @@ func (m *tidbInitManager) Sync(ti *v1alpha1.TidbInitializer) error {
 		return nil
 	}
 
-	err = m.syncTiDBInitConfigMap(ti, tc)
+	err = m.syncTiDBInitConfigMap(ti, tc) //创建一个cm出来，cm里面包含了初始化root账号密码的命令
 	if err != nil {
 		return err
 	}
-	err = m.syncTiDBInitJob(ti)
+	err = m.syncTiDBInitJob(ti) //创建一个job出来，job里面会挂载上面的cm，然后把cm中的信息放置到job起来的pod内部去，执行命令
 	if err != nil {
 		return err
 	}
-	return m.updateStatus(ti.DeepCopy())
+	return m.updateStatus(ti.DeepCopy()) //更新tidbinitializer状态信息
 }
 
 func (m *tidbInitManager) updateStatus(ti *v1alpha1.TidbInitializer) error {

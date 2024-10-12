@@ -146,6 +146,7 @@ func (u *tikvUpgrader) Upgrade(meta metav1.Object, oldSet *apps.StatefulSet, new
 			}
 
 			// If pods recreated successfully, endEvictLeader for the store on this Pod.
+			// 先驱逐掉这个store上面的leader，然后再进行升级
 			done, err := u.endEvictLeaderAfterUpgrade(tc, pod)
 			if err != nil {
 				return err
